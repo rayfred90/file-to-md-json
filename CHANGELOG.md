@@ -5,6 +5,34 @@ All notable changes to the Document Converter & Text Splitter project will be do
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2025-07-06
+
+### 🐛 Bug Fixes
+- **Fixed JSON Serialization Error for Excel Files with Timestamps**
+  - Resolved "Object of type Timestamp is not JSON serializable" error when converting Excel files containing date/time columns
+  - Added `CustomJSONEncoder` class to handle pandas Timestamp objects, datetime objects, and numpy data types
+  - Updated all JSON serialization points throughout the application (`app.py`, `minio_storage/minio_service.py`)
+  - Enhanced Excel processor to preprocess datetime columns before JSON conversion
+  - Timestamps are now converted to ISO format strings (e.g., "2023-01-01T12:00:00")
+
+### 🔧 Technical Improvements
+- **Enhanced Data Type Handling**
+  - Added support for pandas NaT (Not a Time) values → converted to `null` in JSON
+  - Added support for numpy integer/float types → converted to native Python types
+  - Added support for numpy arrays → converted to Python lists
+  - Added support for timezone-aware timestamps
+
+### ✅ Testing
+- Created comprehensive test suite for timestamp handling
+- Verified Excel files with various date/time formats convert successfully
+- Tested edge cases including NaT values and timezone-aware timestamps
+- Validated both JSON and Markdown output formats
+
+### 📋 Files Modified
+- `app.py`: Added CustomJSONEncoder and updated JSON serialization calls
+- `processors/excel_processor.py`: Enhanced timestamp preprocessing
+- `minio_storage/minio_service.py`: Updated metadata serialization
+
 ## [1.0.0] - 2025-06-02
 
 ### 🎉 Initial Release

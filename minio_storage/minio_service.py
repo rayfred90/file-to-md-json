@@ -11,6 +11,25 @@ from typing import Tuple, Optional, List, Dict, Any
 from minio import Minio
 from minio.error import S3Error
 import io
+import pandas as pd
+import numpy as np
+
+# Custom JSON encoder to handle pandas Timestamp and other non-serializable types
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif pd.isna(obj):
+            return None
+        return super().default(obj)
 
 
 class MinIOService:
@@ -287,7 +306,7 @@ class MinIOService:
             
             metadata_path = os.path.join(metadata_dir, f"{file_id}.json")
             with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
+                json.dump(metadata, f, indent=2, cls=CustomJSONEncoder)
             
             return True, "Metadata saved successfully"
             
@@ -407,7 +426,7 @@ class MinIOService:
             
             conversion_path = os.path.join(conversions_dir, f"{conversion_id}.json")
             with open(conversion_path, 'w') as f:
-                json.dump(conversion_metadata, f, indent=2)
+                json.dump(conversion_metadata, f, indent=2, cls=CustomJSONEncoder)
             
             return True, conversion_id
             
@@ -507,7 +526,7 @@ class MinIOService:
         
         # Save metadata to documents bucket
         metadata_path = f"{document_id}/metadata.json"
-        metadata_content = json.dumps(folder_metadata, indent=2).encode('utf-8')
+        metadata_content = json.dumps(folder_metadata, indent=2, cls=CustomJSONEncoder).encode('utf-8')
         
         try:
             self.client.put_object(
@@ -635,7 +654,7 @@ class MinIOService:
             
             # Save updated metadata
             metadata_path = f"{document_id}/metadata.json"
-            metadata_content = json.dumps(metadata, indent=2).encode('utf-8')
+            metadata_content = json.dumps(metadata, indent=2, cls=CustomJSONEncoder).encode('utf-8')
             
             self.client.put_object(
                 bucket_name=self.documents_bucket,
@@ -755,7 +774,7 @@ class MinIOService:
             }
             
             # Save metadata.json to the folder
-            metadata_content = json.dumps(metadata, indent=2, ensure_ascii=False)
+            metadata_content = json.dumps(metadata, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             metadata_path = f"{folder_name}/metadata.json"
             
             success, error_msg = self._upload_to_bucket(
@@ -924,7 +943,7 @@ class MinIOService:
                 metadata['extraction_summary']['text_extracted'] = True
             
             # Save updated metadata
-            updated_metadata = json.dumps(metadata, indent=2, ensure_ascii=False)
+            updated_metadata = json.dumps(metadata, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             self._upload_to_bucket(
                 bucket=self.outputs_bucket,
                 object_name=metadata_path,

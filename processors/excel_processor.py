@@ -51,6 +51,11 @@ class ExcelProcessor(BaseProcessor):
             if df is None:
                 df = pd.read_csv(filepath, encoding='utf-8', errors='ignore')
             
+            # Convert any datetime/timestamp columns to strings to avoid JSON serialization issues
+            for col in df.columns:
+                if df[col].dtype == 'datetime64[ns]' or pd.api.types.is_datetime64_any_dtype(df[col]):
+                    df[col] = df[col].astype(str)
+            
             sheet_data = {
                 'name': 'Sheet1',
                 'data': df.to_dict('records'),
@@ -101,6 +106,11 @@ class ExcelProcessor(BaseProcessor):
             for sheet_name in wb.sheetnames:
                 try:
                     df = pd.read_excel(filepath, sheet_name=sheet_name)
+                    
+                    # Convert any datetime/timestamp columns to strings to avoid JSON serialization issues
+                    for col in df.columns:
+                        if df[col].dtype == 'datetime64[ns]' or pd.api.types.is_datetime64_any_dtype(df[col]):
+                            df[col] = df[col].astype(str)
                     
                     sheet_data = {
                         'name': sheet_name,

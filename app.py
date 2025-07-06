@@ -13,6 +13,26 @@ from flask_cors import CORS
 import tempfile
 import uuid
 from werkzeug.utils import secure_filename
+import pandas as pd
+from datetime import datetime
+import numpy as np
+
+# Custom JSON encoder to handle pandas Timestamp and other non-serializable types
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif pd.isna(obj):
+            return None
+        return super().default(obj)
 
 # Document processors
 from processors.pdf_processor import PDFProcessor
@@ -344,7 +364,7 @@ def convert_file():
             
             # Format output
             if output_format == 'json':
-                output_content = json.dumps(content, indent=2, ensure_ascii=False)
+                output_content = json.dumps(content, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
                 output_filename = f"{file_id}.json"
                 output_extension = 'json'
             else:  # markdown
@@ -386,7 +406,7 @@ def convert_file():
                 )
                 
                 # Save JSON version
-                json_content = json.dumps(content, indent=2, ensure_ascii=False)
+                json_content = json.dumps(content, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
                 json_success, json_path = minio_service.add_file_to_conversion_folder(
                     folder_id=folder_id,
                     file_content=json_content.encode('utf-8'),
@@ -541,9 +561,9 @@ def split_text():
                     'chunks': chunks,
                     'chunk_count': len(chunks),
                     'splitter_params': splitter_params
-                }, indent=2, ensure_ascii=False)
+                }, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             else:  # markdown
-                split_content = f"# Split Document\n\n**Chunk Count:** {len(chunks)}\n\n**Splitter Parameters:** {json.dumps(splitter_params, indent=2)}\n\n---\n\n"
+                split_content = f"# Split Document\n\n**Chunk Count:** {len(chunks)}\n\n**Splitter Parameters:** {json.dumps(splitter_params, indent=2, cls=CustomJSONEncoder)}\n\n---\n\n"
                 for i, chunk in enumerate(chunks, 1):
                     split_content += f"## Chunk {i}\n\n{chunk}\n\n---\n\n"
             

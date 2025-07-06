@@ -56,6 +56,12 @@ uploads/
 outputs/
 *.log
 
+# MinIO Storage Data
+minio_storage/data/
+file_metadata/
+conversion_metadata/
+sessions/
+
 # Test files - keep example files but exclude generated test outputs
 downloaded_converted.md
 test_download.md
