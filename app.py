@@ -4,6 +4,8 @@ import io
 import glob
 import tempfile
 import uuid
+import threading
+import time
 from io import BytesIO
 from typing import Dict, List, Any, Optional
 from flask import Flask, request, jsonify, send_file, send_from_directory, session
@@ -40,6 +42,49 @@ app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Load configuration
 config = Config()
+
+# Progress tracking
+progress_store = {}
+progress_lock = threading.Lock()
+
+def update_progress(session_id: str, file_id: str, percentage: int, message: str):
+    """Update progress for a conversion task"""
+    with progress_lock:
+        key = f"{session_id}:{file_id}"
+        progress_store[key] = {
+            'percentage': percentage,
+            'message': message,
+            'timestamp': time.time()
+        }
+
+def get_progress(session_id: str, file_id: str) -> dict:
+    """Get progress for a conversion task"""
+    with progress_lock:
+        key = f"{session_id}:{file_id}"
+        return progress_store.get(key, {'percentage': 0, 'message': 'Starting...', 'timestamp': time.time()})
+
+def cleanup_old_progress():
+    """Clean up old progress entries (older than 1 hour)"""
+    with progress_lock:
+        current_time = time.time()
+        keys_to_remove = []
+        for key, data in progress_store.items():
+            if current_time - data['timestamp'] > 3600:  # 1 hour
+                keys_to_remove.append(key)
+        for key in keys_to_remove:
+            del progress_store[key]
+
+# Start cleanup thread
+def start_cleanup_thread():
+    def cleanup_worker():
+        while True:
+            time.sleep(300)  # Clean up every 5 minutes
+            cleanup_old_progress()
+    
+    cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
+    cleanup_thread.start()
+
+start_cleanup_thread()
 
 # Configuration
 ALLOWED_EXTENSIONS = {
@@ -126,6 +171,22 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@app.route('/api/progress/<file_id>', methods=['GET'])
+def get_conversion_progress(file_id):
+    """Get the progress of a conversion task"""
+    try:
+        # Get current session (for progress tracking compatibility)
+        session_id = session_service.get_session_id()
+        if not session_id:
+            # Create a temporary session for progress tracking
+            session_id = session_service.get_or_create_session_id()
+        
+        progress = get_progress(session_id, file_id)
+        return jsonify(progress)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     try:
@@ -148,11 +209,11 @@ def upload_file():
         file_extension = filename.rsplit('.', 1)[1].lower()
         
         if minio_service:
-            # MinIO mode - upload to cloud storage
+            # MinIO mode - upload to cloud storage (no session isolation)
             success, file_id, storage_path = minio_service.upload_file(
                 file_content=file_content,
                 file_name=filename,
-                user_id=session_id  # Use session_id as user_id for session isolation
+                user_id=None  # Remove session isolation - store files globally
             )
             
             if not success:
@@ -165,7 +226,7 @@ def upload_file():
                 original_name=filename,
                 storage_path=storage_path,
                 file_size=file_size,
-                user_id=session_id  # Use session_id for session isolation
+                user_id=None  # Remove session isolation - store metadata globally
             )
             
             if not success_db:
@@ -180,7 +241,7 @@ def upload_file():
                 'storage_path': storage_path,
                 'file_size': file_size,
                 'storage_mode': 'minio',
-                'session_id': session_id,
+                'session_id': None,  # Remove session tracking
                 'message': 'File uploaded successfully to MinIO storage'
             })
         else:
@@ -220,18 +281,17 @@ def convert_file():
         
         # Get current session
         session_id = session_service.get_session_id()
-        if not session_id:
-            return jsonify({'error': 'No active session. Please upload a file first.'}), 400
+        # Note: Keeping session for local mode compatibility, but removing session filtering for MinIO mode
         
         if minio_service:
-            # Supabase mode - get file from cloud storage (filtered by session_id)
+            # MinIO mode - get file from cloud storage (no session filtering)
             success, file_record, error_msg = minio_service.get_file_record(file_id)
             if not success:
                 return jsonify({'error': f'File not found: {error_msg}'}), 404
             
-            # Verify file belongs to current session
-            if file_record['user_id'] != session_id:
-                return jsonify({'error': 'File not found in current session'}), 404
+            # Remove session verification - allow access to any file
+            # if file_record['user_id'] != session_id:
+            #     return jsonify({'error': 'File not found in current session'}), 404
             
             # Download file from Supabase Storage
             success, file_content, error_msg = minio_service.download_file(file_record['file_path'])
@@ -261,13 +321,26 @@ def convert_file():
             filename = file_metadata['original_name']
         
         try:
+            # Initialize progress
+            update_progress(session_id, file_id, 0, "Starting conversion...")
+            
             # Process file based on extension
             processor = processors.get(file_extension)
             if not processor:
                 return jsonify({'error': f'No processor found for {file_extension}'}), 400
             
+            # Set up progress callback for PDF processor
+            if file_extension == 'pdf' and hasattr(processor, 'set_progress_callback'):
+                def progress_callback(percentage: int, message: str):
+                    update_progress(session_id, file_id, percentage, message)
+                processor.set_progress_callback(progress_callback)
+            else:
+                update_progress(session_id, file_id, 20, "Processing document...")
+            
             # Convert to text/structured data
             content = processor.process(temp_filepath)
+            
+            update_progress(session_id, file_id, 90, "Formatting output...")
             
             # Format output
             if output_format == 'json':
@@ -282,40 +355,104 @@ def convert_file():
                 output_filename = f"{file_id}.md"
                 output_extension = 'md'
             
+            update_progress(session_id, file_id, 95, "Saving converted file...")
+            
             if minio_service:
-                # MinIO mode - upload converted file to outputs bucket
+                # NEW: Enhanced folder-based conversion system for outputs bucket
+                update_progress(session_id, file_id, 96, "Creating conversion folder...")
+                
+                # Create conversion folder (ALWAYS use folders for ALL conversions)
+                folder_id = minio_service.create_conversion_folder(
+                    file_id=file_id,
+                    original_filename=filename,
+                    session_id=session_id
+                )
+                
+                if not folder_id:
+                    return jsonify({'error': 'Failed to create conversion folder'}), 500
+                
+                # Extract images and other content
+                images = content.get('images', []) if isinstance(content, dict) else []
+                tables = content.get('tables', []) if isinstance(content, dict) else []
+                
+                update_progress(session_id, file_id, 97, "Saving converted files to folder...")
+                
+                # Save markdown version
+                md_success, md_path = minio_service.add_file_to_conversion_folder(
+                    folder_id=folder_id,
+                    file_content=output_content.encode('utf-8'),
+                    filename='converted.md',
+                    file_type='markdown'
+                )
+                
+                # Save JSON version
+                json_content = json.dumps(content, indent=2, ensure_ascii=False)
+                json_success, json_path = minio_service.add_file_to_conversion_folder(
+                    folder_id=folder_id,
+                    file_content=json_content.encode('utf-8'),
+                    filename='converted.json',
+                    file_type='json'
+                )
+                
+                # Save images if any
+                saved_image_paths = []
+                if images:
+                    update_progress(session_id, file_id, 98, f"Saving {len(images)} extracted images...")
+                    saved_image_paths = minio_service.add_images_to_conversion_folder(folder_id, images)
+                
+                # Create a comprehensive summary
+                extraction_summary = {
+                    'text_extracted': True,
+                    'images_extracted': len(images),
+                    'images_saved': len(saved_image_paths),
+                    'tables_extracted': len(tables),
+                    'folder_id': folder_id,
+                    'files_created': []
+                }
+                
+                if md_success:
+                    extraction_summary['files_created'].append('converted.md')
+                if json_success:
+                    extraction_summary['files_created'].append('converted.json')
+                if saved_image_paths:
+                    extraction_summary['files_created'].extend([f"images/{os.path.basename(path)}" for path in saved_image_paths])
+                
+                # Also save to traditional outputs bucket for backward compatibility with existing APIs
                 output_bytes = output_content.encode('utf-8')
-                success, output_file_id, storage_path = minio_service.upload_output_file(
+                compat_success, output_file_id, compat_storage_path = minio_service.upload_output_file(
                     file_content=output_bytes,
                     file_name=output_filename,
-                    user_id=session_id  # Use session_id for session isolation
+                    user_id=None
                 )
                 
-                if not success:
-                    return jsonify({'error': 'Failed to save converted file'}), 500
+                if compat_success:
+                    # Record conversion in local metadata for compatibility
+                    success_conversion, conversion_id = minio_service.create_conversion_record(
+                        file_id=file_id,
+                        output_format=output_format,
+                        output_path=compat_storage_path,
+                        user_id=session_id,
+                        content_length=len(output_content)
+                    )
                 
-                # Record conversion in local metadata
-                success_conversion, conversion_id = minio_service.create_conversion_record(
-                    file_id=file_id,
-                    output_format=output_format,
-                    output_path=storage_path,
-                    user_id=session_id,
-                    content_length=len(output_content)
-                )
-                
-                if not success_conversion:
-                    return jsonify({'error': f'Failed to record conversion: {conversion_id}'}), 500
+                update_progress(session_id, file_id, 100, "Conversion completed with enhanced folder organization!")
                 
                 return jsonify({
                     'file_id': file_id,
-                    'output_file_id': output_file_id,
+                    'output_file_id': output_file_id if compat_success else None,
                     'output_format': output_format,
                     'content_preview': output_content[:500] + '...' if len(output_content) > 500 else output_content,
                     'content_length': len(output_content),
-                    'storage_path': storage_path,
-                    'storage_mode': 'minio',
+                    'storage_path': compat_storage_path if compat_success else None,
+                    'storage_mode': 'enhanced_folders',
                     'session_id': session_id,
-                    'message': 'File converted successfully'
+                    'conversion_folder': {
+                        'folder_id': folder_id,
+                        'folder_path': f"outputs/{folder_id}/",
+                        'extraction_summary': extraction_summary,
+                        'files_available': extraction_summary['files_created']
+                    },
+                    'message': f'File converted successfully to folder with {len(images)} images and {len(tables)} tables extracted'
                 })
             else:
                 # Local mode - save converted file using local file manager
@@ -329,6 +466,8 @@ def convert_file():
                 
                 if not success:
                     return jsonify({'error': f'Failed to save converted file: {output_file_id}'}), 500
+                
+                update_progress(session_id, file_id, 100, "Conversion completed successfully!")
                 
                 return jsonify({
                     'file_id': file_id,
@@ -366,15 +505,14 @@ def split_text():
         
         # Get current session
         session_id = session_service.get_session_id()
-        if not session_id:
-            return jsonify({'error': 'No active session. Please upload a file first.'}), 400
+        # Note: Keeping session for local mode compatibility, but removing session filtering for MinIO mode
         
         if minio_service:
-            # MinIO mode - find the converted file
+            # MinIO mode - find the converted file (no session filtering)
             success, conversion_record, error_msg = minio_service.get_conversion_record(
                 file_id=file_id,
                 output_format=output_format,
-                user_id=session_id
+                user_id=None  # Remove session filtering - access any file
             )
             
             if not success:
@@ -476,17 +614,26 @@ def download_file(file_id, file_type):
     try:
         # Get current session
         session_id = session_service.get_session_id()
-        if not session_id:
-            return jsonify({'error': 'No active session'}), 400
+        # Note: Keeping session for local mode compatibility, but removing session filtering for MinIO mode
         
         if minio_service:
             # MinIO mode
             if file_type == 'original':
-                # Find original converted file (filtered by session)
+                # Download the original uploaded file (not converted file)
+                success, file_record, error_msg = minio_service.get_file_record(file_id)
+                if not success:
+                    return jsonify({'error': f'File not found: {error_msg}'}), 404
+                
+                storage_path = file_record['storage_path']
+                filename = file_record['original_name']
+                bucket = minio_service.uploads_bucket
+                
+            elif file_type == 'converted':
+                # Find converted file (no session filtering)
                 success, conversion_record, error_msg = minio_service.get_conversion_record(
                     file_id=file_id,
                     output_format='md',  # Default format, could be enhanced
-                    user_id=session_id
+                    user_id=None  # Remove session filtering
                 )
                 
                 if not success:
@@ -494,11 +641,11 @@ def download_file(file_id, file_type):
                     success, conversion_record, error_msg = minio_service.get_conversion_record(
                         file_id=file_id,
                         output_format='json',
-                        user_id=session_id
+                        user_id=None  # Remove session filtering
                     )
                 
                 if not success:
-                    return jsonify({'error': 'Converted file not found in current session'}), 404
+                    return jsonify({'error': 'Converted file not found'}), 404
                 
                 storage_path = conversion_record['output_path']
                 output_format = conversion_record['output_format']
@@ -510,7 +657,7 @@ def download_file(file_id, file_type):
                 success, conversion_record, error_msg = minio_service.get_conversion_record(
                     file_id=file_id,
                     output_format='md',  # Default format
-                    user_id=session_id
+                    user_id=None  # Remove session filtering
                 )
                 
                 if not success:
@@ -518,22 +665,22 @@ def download_file(file_id, file_type):
                     success, conversion_record, error_msg = minio_service.get_conversion_record(
                         file_id=file_id,
                         output_format='json',
-                        user_id=session_id
+                        user_id=None  # Remove session filtering
                     )
                 
                 if not success:
-                    return jsonify({'error': 'No conversions found for this file in current session'}), 404
+                    return jsonify({'error': 'No split files found for this file'}), 404
                 
                 output_format = conversion_record['output_format']
                 
-                # Look for split file with naming pattern
+                # Look for split file with naming pattern (global storage, no user prefix)
                 split_filename = f"{file_id}_split.{output_format}"
-                storage_path = f"{session_id}/{split_filename}"
+                storage_path = split_filename  # No session prefix for global storage
                 filename = split_filename
                 bucket = minio_service.splits_bucket
                 
             else:
-                return jsonify({'error': 'Invalid file type. Use "original" or "split"'}), 400
+                return jsonify({'error': 'Invalid file type. Use "original", "converted", or "split"'}), 400
             
             # Download file from MinIO
             success, file_content, error_msg = minio_service.download_file(storage_path, bucket)
@@ -553,7 +700,7 @@ def download_file(file_id, file_type):
             if file_type == 'original':
                 success, file_path, filename, error_msg = local_file_manager.get_converted_file_path(file_id, session_id)
             elif file_type == 'split':
-                success, file_path
+                success, file_path, filename, error_msg = local_file_manager.get_split_file_path(file_id, session_id)
             else:
                 return jsonify({'error': 'Invalid file type. Use "original" or "split"'}), 400
             
@@ -603,21 +750,11 @@ def health_check():
 
 @app.route('/api/files')
 def list_files():
-    """List files in current session"""
+    """List files (all files, no session filtering)"""
     try:
-        # Get current session
-        session_id = session_service.get_session_id()
-        if not session_id:
-            return jsonify({
-                'files': [],
-                'total_count': 0,
-                'session_id': None,
-                'message': 'No active session'
-            })
-        
         if minio_service:
-            # MinIO mode - get files filtered by session_id
-            success, files, error_msg = minio_service.get_user_files(user_id=session_id)
+            # MinIO mode - get ALL files (no session filtering)
+            success, files, error_msg = minio_service.get_user_files(user_id=None)
             
             if not success:
                 return jsonify({'error': f'Failed to retrieve files: {error_msg}'}), 500
@@ -630,11 +767,21 @@ def list_files():
             return jsonify({
                 'files': files,
                 'total_count': len(files),
-                'session_id': session_id,
+                'session_id': None,  # Remove session tracking
                 'storage_mode': 'minio',
                 'message': 'Files retrieved successfully'
             })
         else:
+            # Local mode - get current session for compatibility
+            session_id = session_service.get_session_id()
+            if not session_id:
+                return jsonify({
+                    'files': [],
+                    'total_count': 0,
+                    'session_id': None,
+                    'message': 'No active session'
+                })
+            
             # Local mode - get files using local file manager
             success, files, error_msg = local_file_manager.list_session_files(session_id)
             
@@ -654,23 +801,18 @@ def list_files():
 
 @app.route('/api/files/<file_id>', methods=['DELETE'])
 def delete_file_endpoint(file_id):
-    """Delete a file and all its associated data"""
+    """Delete a file and all its associated data (no session filtering)"""
     try:
-        # Get current session
-        session_id = session_service.get_session_id()
-        if not session_id:
-            return jsonify({'error': 'No active session'}), 400
-        
         if minio_service:
-            # MinIO mode with local metadata
-            # Get file record and verify it belongs to current session
+            # MinIO mode with local metadata (no session filtering)
+            # Get file record without session verification
             success, file_record, error_msg = minio_service.get_file_record(file_id)
             if not success:
                 return jsonify({'error': f'File not found: {error_msg}'}), 404
             
-            # Verify file belongs to current session
-            if file_record['user_id'] != session_id:
-                return jsonify({'error': 'File not found in current session'}), 404
+            # Remove session verification - allow deletion of any file
+            # if file_record['user_id'] != session_id:
+            #     return jsonify({'error': 'File not found in current session'}), 404
             
             # Delete from MinIO storage
             if not minio_service.delete_file(file_record['storage_path']):
@@ -685,9 +827,9 @@ def delete_file_endpoint(file_id):
             except Exception as e:
                 print(f"⚠️  Warning: Could not delete metadata file: {e}")
             
-            # Delete any output files (converted files)
+            # Delete any output files (converted files) - search all sessions
             try:
-                user_outputs = glob.glob(f"outputs/{session_id}*")
+                user_outputs = glob.glob(f"outputs/*")
                 for output_file in user_outputs:
                     if file_id in output_file:
                         os.remove(output_file)
@@ -701,6 +843,11 @@ def delete_file_endpoint(file_id):
                 'storage_mode': 'minio'
             })
         else:
+            # Local mode - get current session for compatibility
+            session_id = session_service.get_session_id()
+            if not session_id:
+                return jsonify({'error': 'No active session'}), 400
+            
             # Local mode - delete using local file manager
             success, error_msg = local_file_manager.delete_file(file_id, session_id)
             
@@ -832,7 +979,7 @@ def clear_session():
 # File Manager API Routes
 @app.route('/api/files/<bucket_name>')
 def list_bucket_files(bucket_name):
-    """List files in a specific MinIO bucket"""
+    """List all files in a specific MinIO bucket (no session filtering)"""
     try:
         if not minio_service:
             return jsonify({'error': 'MinIO service not available'}), 503
@@ -841,7 +988,7 @@ def list_bucket_files(bucket_name):
         if bucket_name not in ['uploads', 'outputs', 'splits']:
             return jsonify({'error': 'Invalid bucket name'}), 400
         
-        # List files in the bucket
+        # List ALL files in the bucket (remove session filtering)
         files = []
         try:
             objects = minio_service.client.list_objects(bucket_name, recursive=True)
@@ -849,8 +996,12 @@ def list_bucket_files(bucket_name):
                 # Get object stats for more info
                 stat = minio_service.client.stat_object(bucket_name, obj.object_name)
                 
+                # Use the full object name as display name (no session prefix removal)
+                display_name = obj.object_name
+                
                 file_info = {
-                    'name': obj.object_name,
+                    'name': display_name,
+                    'full_path': obj.object_name,  # Keep full path for downloads
                     'size': obj.size,
                     'lastModified': obj.last_modified.isoformat() if obj.last_modified else None,
                     'type': obj.object_name.split('.')[-1] if '.' in obj.object_name else 'unknown',
@@ -867,110 +1018,115 @@ def list_bucket_files(bucket_name):
         return jsonify({
             'files': files,
             'bucket': bucket_name,
-            'count': len(files)
+            'count': len(files),
+            'session_id': None  # Remove session tracking
         })
         
     except Exception as e:
         print(f"Error in list_bucket_files: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/download/<bucket_name>/<path:filename>')
-def download_bucket_file(bucket_name, filename):
-    """Download a file from a MinIO bucket"""
+@app.route('/api/conversion-folders')
+def list_conversion_folders():
+    """List all conversion folders in outputs bucket"""
     try:
         if not minio_service:
             return jsonify({'error': 'MinIO service not available'}), 503
         
-        # Validate bucket name
-        if bucket_name not in ['uploads', 'outputs', 'splits']:
-            return jsonify({'error': 'Invalid bucket name'}), 400
+        # Get all conversion folders
+        folders = minio_service.list_conversion_folders()
         
-        # Get the file from MinIO
-        try:
-            response = minio_service.client.get_object(bucket_name, filename)
-            file_data = response.read()
-            response.close()
-            
-            # Determine content type based on file extension
-            content_type = 'application/octet-stream'
-            if filename.endswith('.pdf'):
-                content_type = 'application/pdf'
-            elif filename.endswith(('.txt', '.md')):
-                content_type = 'text/plain'
-            elif filename.endswith('.json'):
-                content_type = 'application/json'
-            elif filename.endswith(('.doc', '.docx')):
-                content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            
-            return send_file(
-                BytesIO(file_data),
-                as_attachment=True,
-                download_name=filename.split('/')[-1],  # Get just the filename without path
-                mimetype=content_type
-            )
-            
-        except Exception as e:
-            print(f"Error downloading file {filename} from {bucket_name}: {e}")
-            return jsonify({'error': 'File not found'}), 404
+        return jsonify({
+            'folders': folders,
+            'count': len(folders),
+            'bucket': 'outputs'
+        })
         
     except Exception as e:
-        print(f"Error in download_bucket_file: {e}")
+        print(f"Error in list_conversion_folders: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/preview/<bucket_name>/<path:filename>')
-def preview_bucket_file(bucket_name, filename):
-    """Preview a text file from a MinIO bucket"""
+@app.route('/api/conversion-folders/<folder_id>/files')
+def list_conversion_folder_files(folder_id):
+    """List all files in a specific conversion folder"""
     try:
         if not minio_service:
             return jsonify({'error': 'MinIO service not available'}), 503
         
-        # Validate bucket name
-        if bucket_name not in ['uploads', 'outputs', 'splits']:
-            return jsonify({'error': 'Invalid bucket name'}), 400
+        # Get folder metadata
+        success, metadata = minio_service.get_conversion_folder_metadata(folder_id)
+        if not success:
+            return jsonify({'error': 'Folder not found'}), 404
         
-        # Check if file is previewable
-        file_ext = filename.split('.')[-1].lower()
-        if file_ext not in ['txt', 'md', 'json', 'csv']:
-            return jsonify({'error': 'File type not previewable'}), 400
+        # Get files in folder
+        files = minio_service.list_conversion_folder_files(folder_id)
         
-        # Get the file from MinIO
-        try:
-            response = minio_service.client.get_object(bucket_name, filename)
-            file_content = response.read().decode('utf-8')
-            response.close()
-            
-            return file_content, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-            
-        except Exception as e:
-            print(f"Error previewing file {filename} from {bucket_name}: {e}")
-            return jsonify({'error': 'File not found or cannot be previewed'}), 404
+        return jsonify({
+            'folder_id': folder_id,
+            'metadata': metadata,
+            'files': files,
+            'count': len(files)
+        })
         
     except Exception as e:
-        print(f"Error in preview_bucket_file: {e}")
+        print(f"Error in list_conversion_folder_files: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/delete/<bucket_name>/<path:filename>', methods=['DELETE'])
-def delete_bucket_file(bucket_name, filename):
-    """Delete a file from a MinIO bucket"""
+@app.route('/api/conversion-folders/<folder_id>/download/<path:filename>')
+def download_from_conversion_folder(folder_id, filename):
+    """Download a specific file from a conversion folder"""
     try:
         if not minio_service:
             return jsonify({'error': 'MinIO service not available'}), 503
         
-        # Validate bucket name
-        if bucket_name not in ['uploads', 'outputs', 'splits']:
-            return jsonify({'error': 'Invalid bucket name'}), 400
+        # Construct full file path
+        file_path = f"{folder_id}/{filename}"
         
-        # Delete the file from MinIO
-        try:
-            minio_service.client.remove_object(bucket_name, filename)
-            return jsonify({'message': f'File {filename} deleted successfully'})
-            
-        except Exception as e:
-            print(f"Error deleting file {filename} from {bucket_name}: {e}")
-            return jsonify({'error': 'File not found or could not be deleted'}), 404
+        # Download file from MinIO
+        success, file_content, error_msg = minio_service.download_from_conversion_folder(folder_id, filename)
+        
+        if not success:
+            return jsonify({'error': f'File not found: {error_msg}'}), 404
+        
+        # Determine content type based on file extension
+        content_type = 'application/octet-stream'
+        if filename.endswith('.md'):
+            content_type = 'text/markdown'
+        elif filename.endswith('.json'):
+            content_type = 'application/json'
+        elif filename.endswith(('.png', '.jpg', '.jpeg', '.gif')):
+            content_type = f'image/{filename.split(".")[-1]}'
+        
+        return send_file(
+            BytesIO(file_content),
+            as_attachment=True,
+            download_name=filename,
+            mimetype=content_type
+        )
         
     except Exception as e:
-        print(f"Error in delete_bucket_file: {e}")
+        print(f"Error downloading from conversion folder: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/conversion-folders/<folder_id>', methods=['DELETE'])
+def delete_conversion_folder(folder_id):
+    """Delete entire conversion folder and all its contents"""
+    try:
+        if not minio_service:
+            return jsonify({'error': 'MinIO service not available'}), 503
+        
+        # Delete the entire folder
+        success, error_msg = minio_service.delete_conversion_folder(folder_id)
+        
+        if not success:
+            return jsonify({'error': f'Failed to delete folder: {error_msg}'}), 500
+        
+        return jsonify({
+            'message': f'Conversion folder {folder_id} deleted successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error deleting conversion folder: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bulk-delete/<bucket_name>', methods=['DELETE'])
@@ -1018,6 +1174,71 @@ def bulk_delete_files(bucket_name):
         
     except Exception as e:
         print(f"Error in bulk_delete_files: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk-download/<bucket_name>', methods=['POST'])
+def bulk_download_files(bucket_name):
+    """Create a zip file with multiple files from a MinIO bucket"""
+    try:
+        if not minio_service:
+            return jsonify({'error': 'MinIO service not available'}), 503
+        
+        # Validate bucket name
+        if bucket_name not in ['uploads', 'outputs', 'splits']:
+            return jsonify({'error': 'Invalid bucket name'}), 400
+        
+        data = request.get_json()
+        if not data or 'filenames' not in data:
+            return jsonify({'error': 'Filenames list required'}), 400
+        
+        filenames = data['filenames']
+        if not isinstance(filenames, list) or len(filenames) == 0:
+            return jsonify({'error': 'Invalid filenames list'}), 400
+        
+        import zipfile
+        import io
+        from datetime import datetime
+        
+        # Create a zip file in memory
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            downloaded_files = []
+            failed_files = []
+            
+            for filename in filenames:
+                try:
+                    # Get file from MinIO
+                    response = minio_service.client.get_object(bucket_name, filename)
+                    file_data = response.read()
+                    response.close()
+                    
+                    # Add file to zip
+                    zip_file.writestr(filename, file_data)
+                    downloaded_files.append(filename)
+                    
+                except Exception as e:
+                    print(f"Error downloading file {filename} from {bucket_name}: {e}")
+                    failed_files.append({'filename': filename, 'error': str(e)})
+        
+        if len(downloaded_files) == 0:
+            return jsonify({'error': 'No files could be downloaded'}), 400
+        
+        zip_buffer.seek(0)
+        
+        # Generate zip filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        zip_filename = f"{bucket_name}_files_{timestamp}.zip"
+        
+        return send_file(
+            zip_buffer,
+            as_attachment=True,
+            download_name=zip_filename,
+            mimetype='application/zip'
+        )
+        
+    except Exception as e:
+        print(f"Error in bulk_download_files: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/convert-again', methods=['POST'])
@@ -1115,6 +1336,273 @@ def convert_again():
         
     except Exception as e:
         print(f"Error in convert_again: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/view/<bucket_name>/<path:filename>', methods=['GET'])
+def view_file(bucket_name, filename):
+    """View a file directly from MinIO bucket (opens in new tab/window)"""
+    try:
+        if not minio_service:
+            return jsonify({'error': 'MinIO service not available'}), 503
+        
+        # Validate bucket name
+        if bucket_name not in ['uploads', 'outputs', 'splits']:
+            return jsonify({'error': 'Invalid bucket name'}), 400
+        
+        # Check if file exists
+        try:
+            minio_service.client.stat_object(bucket_name, filename)
+        except Exception as e:
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Get file from MinIO
+        try:
+            response = minio_service.client.get_object(bucket_name, filename)
+            file_data = response.read()
+            response.close()
+            
+            # Determine content type
+            file_ext = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
+            
+            # Set content type based on file extension
+            content_type_map = {
+                'pdf': 'application/pdf',
+                'txt': 'text/plain; charset=utf-8',
+                'md': 'text/markdown; charset=utf-8',
+                'json': 'application/json; charset=utf-8',
+                'html': 'text/html; charset=utf-8',
+                'css': 'text/css; charset=utf-8',
+                'js': 'application/javascript; charset=utf-8',
+                'xml': 'application/xml; charset=utf-8',
+                'csv': 'text/csv; charset=utf-8',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'bmp': 'image/bmp',
+                'webp': 'image/webp',
+                'svg': 'image/svg+xml'
+            }
+            
+            content_type = content_type_map.get(file_ext, 'application/octet-stream')
+            
+            # Create response with proper headers
+            from flask import Response
+            response = Response(file_data)
+            response.headers['Content-Type'] = content_type
+            response.headers['Content-Disposition'] = f'inline; filename="{filename}"'
+            response.headers['Cache-Control'] = 'no-cache'
+            
+            return response
+            
+        except Exception as e:
+            print(f"Error viewing file {filename} from {bucket_name}: {e}")
+            return jsonify({'error': f'Failed to view file: {str(e)}'}), 500
+        
+    except Exception as e:
+        print(f"Error in view_file: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/preview/<bucket_name>/<path:filename>', methods=['GET'])
+def preview_file(bucket_name, filename):
+    """Preview a file from MinIO bucket (for file manager frontend)"""
+    try:
+        if not minio_service:
+            return jsonify({'error': 'MinIO service not available'}), 503
+        
+        # Validate bucket name
+        if bucket_name not in ['uploads', 'outputs', 'splits']:
+            return jsonify({'error': 'Invalid bucket name'}), 400
+        
+        # Check if file exists
+        try:
+            minio_service.client.stat_object(bucket_name, filename)
+        except Exception as e:
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Get file from MinIO
+        try:
+            response = minio_service.client.get_object(bucket_name, filename)
+            file_data = response.read()
+            response.close()
+            
+            # Determine file type
+            file_ext = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
+            
+            # Handle different file types for preview
+            if file_ext in ['md', 'txt', 'json', 'xml', 'yaml', 'html', 'css', 'js', 'py', 'java', 'cpp', 'sql', 'php', 'go', 'rust']:
+                # Text-based files - return content as text
+                try:
+                    content = file_data.decode('utf-8')
+                    return jsonify({
+                        'success': True,
+                        'content': content,
+                        'type': 'text',
+                        'file_type': file_ext,
+                        'filename': filename,
+                        'size': len(file_data)
+                    })
+                except UnicodeDecodeError:
+                    return jsonify({'error': 'File contains binary data and cannot be previewed as text'}), 400
+            
+            elif file_ext in ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'tiff', 'tif']:
+                # Image files - return as base64 encoded data
+                import base64
+                encoded_data = base64.b64encode(file_data).decode('utf-8')
+                return jsonify({
+                    'success': True,
+                    'content': encoded_data,
+                    'type': 'image',
+                    'file_type': file_ext,
+                    'filename': filename,
+                    'size': len(file_data)
+                })
+            
+            elif file_ext == 'pdf':
+                # PDF files - return basic info (could be extended to extract text preview)
+                return jsonify({
+                    'success': True,
+                    'content': f'PDF file: {filename}\nSize: {len(file_data)} bytes\n\nUse download to view the full PDF.',
+                    'type': 'binary',
+                    'file_type': file_ext,
+                    'filename': filename,
+                    'size': len(file_data)
+                })
+            
+            else:
+                # Other binary files
+                return jsonify({
+                    'success': True,
+                    'content': f'Binary file: {filename}\nSize: {len(file_data)} bytes\nType: {file_ext}\n\nThis file type cannot be previewed. Use download to access the file.',
+                    'type': 'binary',
+                    'file_type': file_ext,
+                    'filename': filename,
+                    'size': len(file_data)
+                })
+            
+        except Exception as e:
+            print(f"Error previewing file {filename} from {bucket_name}: {e}")
+            return jsonify({'error': f'Failed to preview file: {str(e)}'}), 500
+        
+    except Exception as e:
+        print(f"Error in preview_file: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/download/<bucket_name>/<path:filename>', methods=['GET'])
+def download_file_by_filename(bucket_name, filename):
+    """Download a file from MinIO bucket by filename (for file manager frontend)"""
+    try:
+        if not minio_service:
+            return jsonify({'error': 'MinIO service not available'}), 503
+        
+        # Validate bucket name
+        if bucket_name not in ['uploads', 'outputs', 'splits']:
+            return jsonify({'error': 'Invalid bucket name'}), 400
+        
+        # Check if file exists
+        try:
+            minio_service.client.stat_object(bucket_name, filename)
+        except Exception as e:
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Get file from MinIO
+        try:
+            response = minio_service.client.get_object(bucket_name, filename)
+            file_data = response.read()
+            response.close()
+            
+            # Determine content type based on file extension
+            file_ext = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
+            content_type_map = {
+                'pdf': 'application/pdf',
+                'txt': 'text/plain',
+                'md': 'text/markdown',
+                'json': 'application/json',
+                'html': 'text/html',
+                'css': 'text/css',
+                'js': 'application/javascript',
+                'xml': 'application/xml',
+                'csv': 'text/csv',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'bmp': 'image/bmp',
+                'webp': 'image/webp',
+                'svg': 'image/svg+xml'
+            }
+            
+            content_type = content_type_map.get(file_ext, 'application/octet-stream')
+            
+            # Get just the filename for download (not the full path)
+            download_filename = filename.split('/')[-1]
+            
+            # Create response for download
+            from flask import Response
+            response = Response(file_data)
+            response.headers['Content-Type'] = content_type
+            response.headers['Content-Disposition'] = f'attachment; filename="{download_filename}"'
+            response.headers['Content-Length'] = str(len(file_data))
+            
+            return response
+            
+        except Exception as e:
+            print(f"Error downloading file {filename} from {bucket_name}: {e}")
+            return jsonify({'error': f'Failed to download file: {str(e)}'}), 500
+        
+    except Exception as e:
+        print(f"Error in download_file_by_filename: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/delete/<bucket_name>/<path:filename>', methods=['DELETE'])
+def delete_file_by_filename(bucket_name, filename):
+    """Delete a file from MinIO bucket by filename (for file manager frontend)"""
+    try:
+        if not minio_service:
+            return jsonify({'error': 'MinIO service not available'}), 503
+        
+        # Validate bucket name
+        if bucket_name not in ['uploads', 'outputs', 'splits']:
+            return jsonify({'error': 'Invalid bucket name'}), 400
+        
+        # Check if file exists
+        try:
+            minio_service.client.stat_object(bucket_name, filename)
+        except Exception as e:
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Delete the file from MinIO
+        try:
+            minio_service.client.remove_object(bucket_name, filename)
+            
+            # If it's an uploads file, also try to clean up related metadata
+            if bucket_name == 'uploads':
+                # Extract potential file_id from filename if it follows the pattern
+                # filename format might be: file_id_originalname.ext
+                parts = filename.split('_', 1)
+                if len(parts) > 1:
+                    potential_file_id = parts[0]
+                    # Try to clean up metadata file
+                    try:
+                        metadata_path = os.path.join('file_metadata', f"{potential_file_id}.json")
+                        if os.path.exists(metadata_path):
+                            os.remove(metadata_path)
+                            print(f"✅ Cleaned up metadata for {potential_file_id}")
+                    except Exception as e:
+                        print(f"⚠️  Could not clean up metadata: {e}")
+            
+            return jsonify({
+                'message': f'File {filename} deleted successfully from {bucket_name}',
+                'filename': filename,
+                'bucket': bucket_name
+            })
+            
+        except Exception as e:
+            print(f"Error deleting file {filename} from {bucket_name}: {e}")
+            return jsonify({'error': f'Failed to delete file: {str(e)}'}), 500
+        
+    except Exception as e:
+        print(f"Error in delete_file_by_filename: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

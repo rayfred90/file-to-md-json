@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Converter & Text Splitter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .drag-over {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .upload-area {
+            transition: all 0.3s ease;
+        }
+        .page-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-success { background-color: #10b981; }
+        .status-warning { background-color: #f59e0b; }
+        
+        /* Flowchart styles */
+        .flow-card {
+            position: relative;
+            margin-bottom: 3rem;
+        }
+        
+        .flow-arrow {
+            position: absolute;
+            bottom: -3rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 2px;
+            height: 2rem;
+            background: linear-gradient(to bottom, #3b82f6, #60a5fa);
+            z-index: 10;
+        }
+        
+        .flow-arrow::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: -4px;
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 8px solid #60a5fa;
+        }
+        
+        .flow-card:last-child .flow-arrow {
+            display: none;
+        }
+        
+        .step-badge {
+            position: absolute;
+            top: -10px;
+            left: 20px;
+            background: #3b82f6;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .step-completed .step-badge {
+            background: #10b981;
+        }
+        
+        .step-optional .step-badge {
+            background: #f59e0b;
+        }
+        
+        /* Dotted background pattern */
+        .dotted-bg {
+            background-image: radial-gradient(circle, #e5e7eb 1px, transparent 1px);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+        }
+        
+        /* Responsive improvements for split results */
+        @media (max-width: 640px) {
+            #split-info .flex {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            #download-split-btn {
+                width: 100%;
+                margin-top: 0.5rem;
+            }
+            .flow-card {
+                margin-bottom: 2rem;
+            }
+            .flow-arrow {
+                height: 1.5rem;
+                bottom: -2rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen dotted-bg">
+    <div class="page-container">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b mb-8">
+        <div class="container mx-auto px-4">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-xl font-bold text-gray-800">
+                        <i class="fas fa-file-alt mr-2"></i>
+                        Document Converter
+                    </h1>
+                </div>
+                <div class="flex space-x-4">
+                    <a href="/static/index.html" class="px-4 py-2 text-blue-600 font-medium">
+                        <i class="fas fa-upload mr-1"></i>
+                        Converter
+                    </a>
+                    <a href="/static/file-manager.html" class="px-4 py-2 text-gray-600 hover:text-blue-600">
+                        <i class="fas fa-folder mr-1"></i>
+                        File Manager
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-content container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Document Converter & Text Splitter</h1>
+            <p class="text-gray-600">Follow the workflow below to process your documents</p>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="status-messages" class="mb-6"></div>
+
+        <!-- Vertical Flowchart -->
+        <div class="max-w-2xl mx-auto">
+            
+            <!-- Step 1: Upload Document -->
+            <div class="flow-card bg-white rounded-lg shadow-sm border p-6">
+                <div class="step-badge">1</div>
+                <div class="flow-arrow"></div>
+                
+                <h2 class="text-xl font-semibold mb-4 ml-6">Upload Document</h2>
+                
+                <div id="upload-area" class="upload-area border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50">
+                    <div id="upload-content">
+                        <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <p class="text-lg font-medium text-gray-900 mb-2">Drop files here or click to upload</p>
+                        <p class="text-sm text-gray-500">Supports: PDF, Word, Excel, PowerPoint, EPUB, Code files, Text files</p>
+                    </div>
+                    
+                    <div id="upload-progress" class="hidden">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm font-medium text-blue-900">Uploading...</span>
+                                <span id="upload-percentage" class="text-sm text-blue-700">0%</span>
+                            </div>
+                            <div class="w-full bg-blue-200 rounded-full h-2.5">
+                                <div id="upload-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <input type="file" id="file-input" class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.epub,.txt,.md,.py,.js,.html,.css,.json,.xml,.csv">
+                
+                <div id="file-info" class="mt-4 hidden">
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center">
+                            <svg class="h-5 w-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <span class="font-medium text-gray-900">File uploaded successfully</span>
+                        </div>
+                        <div class="mt-2 text-sm text-gray-600">
+                            <span id="file-name" class="font-medium"></span> - <span id="file-size"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Convert Document -->
+            <div class="flow-card bg-white rounded-lg shadow-sm border p-6">
+                <div class="step-badge">2</div>
+                <div class="flow-arrow"></div>
+                
+                <h2 class="text-xl font-semibold mb-4 ml-6">Convert Document</h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Output Format</label>
+                        <select id="output-format" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="md">Markdown (.md)</option>
+                            <option value="json">JSON (.json)</option>
+                        </select>
+                    </div>
+                    
+                    <button id="convert-btn" class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <span id="convert-text">Convert Document</span>
+                        <span id="convert-spinner" class="hidden">
+                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Converting...
+                        </span>
+                    </button>
+                    
+                    <!-- Progress Bar Container -->
+                    <div id="progress-container" class="mt-4 hidden">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm font-medium text-blue-900">Processing Document</span>
+                                <span id="progress-percentage" class="text-sm text-blue-700">0%</span>
+                            </div>
+                            <div class="w-full bg-blue-200 rounded-full h-2.5">
+                                <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                            </div>
+                            <div id="progress-status" class="text-xs text-blue-600 mt-2">Initializing...</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="convert-result" class="mt-4 hidden">
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <div class="flex items-center">
+                            <svg class="h-5 w-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <span class="font-medium text-green-900">Document converted successfully!</span>
+                        </div>
+                        <div class="mt-2">
+                            <p class="text-sm text-green-700">
+                                <span id="content-length"></span> characters processed
+                            </p>
+                            <button id="download-original-btn" class="mt-2 text-sm bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">
+                                Download Converted File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Split Text (Optional) -->
+            <div class="flow-card bg-white rounded-lg shadow-sm border p-6">
+                <div class="step-badge step-optional">3</div>
+                <div class="flow-arrow"></div>
+                
+                <h2 class="text-xl font-semibold mb-4 ml-6">Split Text <span class="text-sm font-normal text-gray-500">(Optional)</span></h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Splitter Type</label>
+                        <select id="splitter-type" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="recursive">Recursive Character Text Splitter</option>
+                            <option value="character">Character Text Splitter</option>
+                            <option value="token">Token Text Splitter</option>
+                            <option value="markdown">Markdown Header Text Splitter</option>
+                            <option value="python">Python Code Splitter</option>
+                            <option value="javascript">JavaScript Code Splitter</option>
+                        </select>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Chunk Size</label>
+                            <input type="number" id="chunk-size" value="1000" min="100" max="10000" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Chunk Overlap</label>
+                            <input type="number" id="chunk-overlap" value="200" min="0" max="1000" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    
+                    <div id="advanced-options" class="space-y-3">
+                        <div>
+                            <label class="flex items-center">
+                                <input type="checkbox" id="keep-separator" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-2">
+                                <span class="text-sm text-gray-700">Keep separator in chunks</span>
+                            </label>
+                        </div>
+                        
+                        <div id="separators-input" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Custom Separators (comma-separated)</label>
+                            <input type="text" id="separators" placeholder="\\n\\n,\\n, ," class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                    
+                    <button id="split-btn" class="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <span id="split-text">Split Text</span>
+                        <span id="split-spinner" class="hidden">
+                            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Splitting...
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 4: Split Results -->
+            <div id="split-results" class="flow-card bg-white rounded-lg shadow-sm border p-6 hidden">
+                <div class="step-badge step-completed">4</div>
+                
+                <h2 class="text-xl font-semibold mb-4 ml-6">Split Results</h2>
+                
+                <div id="split-info" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div>
+                            <p class="font-medium text-blue-900">
+                                <span id="chunk-count"></span> chunks created
+                            </p>
+                            <p class="text-sm text-blue-700">
+                                Parameters: <span id="used-params"></span>
+                            </p>
+                        </div>
+                        <div class="flex-shrink-0">
+                            <button id="download-split-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors">
+                                Download Split File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="chunk-preview" class="space-y-3">
+                    <h3 class="font-medium text-gray-900">Preview (first 3 chunks):</h3>
+                    <div id="preview-container" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex justify-between items-center text-sm text-gray-600">
+                <div>
+                    <span class="status-indicator status-success"></span>
+                    Storage: CLOUD (MinIO)
+                </div>
+                <div>
+                    Document Converter & Text Splitter
+                </div>
+            </div>
+        </div>
+    </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

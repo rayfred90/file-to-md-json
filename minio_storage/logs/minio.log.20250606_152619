@@ -1,0 +1,49 @@
+MinIO Object Storage Server
+Copyright: 2015-2025 MinIO, Inc.
+License: GNU AGPLv3 - https://www.gnu.org/licenses/agpl-3.0.html
+Version: RELEASE.2025-05-24T17-08-30Z (go1.24.3 linux/amd64)
+
+API: http://192.168.56.114:9000  http://10.0.2.15:9000  http://172.17.0.1:9000  http://127.0.0.1:9000 
+WebUI: http://192.168.56.114:9001 http://10.0.2.15:9001 http://172.17.0.1:9001 http://127.0.0.1:9001     
+
+Docs: https://docs.min.io
+WARN: Detected default credentials 'minioadmin:minioadmin', we recommend that you change these values with 'MINIO_ROOT_USER' and 'MINIO_ROOT_PASSWORD' environment variables
+
+API: SYSTEM.storage
+Time: 14:54:42 UTC 06/06/2025
+DeploymentID: 030ccc5b-9ad5-4dd5-b72a-487a4785b18a
+Error: node(127.0.0.1:9000): taking drive /home/adebo/con/minio_storage/data offline: unable to write+read for 31.141s (*errors.errorString)
+       4: internal/logger/logger.go:261:logger.LogAlwaysIf()
+       3: cmd/logging.go:160:cmd.storageLogAlwaysIf()
+       2: cmd/xl-storage-disk-id-check.go:1017:cmd.(*xlStorageDiskIDCheck).monitorDiskWritable.func1.1()
+       1: cmd/xl-storage-disk-id-check.go:1037:cmd.(*xlStorageDiskIDCheck).monitorDiskWritable.func1.2()
+node(127.0.0.1:9000): Read/Write/Delete successful, bringing drive /home/adebo/con/minio_storage/data online
+
+API: SYSTEM.storage
+Time: 14:57:00 UTC 06/06/2025
+DeploymentID: 030ccc5b-9ad5-4dd5-b72a-487a4785b18a
+Error: node(127.0.0.1:9000): taking drive /home/adebo/con/minio_storage/data offline: unable to write+read for 31.848s (*errors.errorString)
+       4: internal/logger/logger.go:261:logger.LogAlwaysIf()
+       3: cmd/logging.go:160:cmd.storageLogAlwaysIf()
+       2: cmd/xl-storage-disk-id-check.go:1017:cmd.(*xlStorageDiskIDCheck).monitorDiskWritable.func1.1()
+       1: cmd/xl-storage-disk-id-check.go:1037:cmd.(*xlStorageDiskIDCheck).monitorDiskWritable.func1.2()
+node(127.0.0.1:9000): Read/Write/Delete successful, bringing drive /home/adebo/con/minio_storage/data online
+INFO: Exiting on signal: INTERRUPT
+
+API: SYSTEM.storage
+Time: 15:00:26 UTC 06/06/2025
+DeploymentID: 030ccc5b-9ad5-4dd5-b72a-487a4785b18a
+Error: node(127.0.0.1:9000): taking drive /home/adebo/con/minio_storage/data offline: unable to write+read for 31.285s (*errors.errorString)
+       4: internal/logger/logger.go:261:logger.LogAlwaysIf()
+       3: cmd/logging.go:160:cmd.storageLogAlwaysIf()
+       2: cmd/xl-storage-disk-id-check.go:1017:cmd.(*xlStorageDiskIDCheck).monitorDiskWritable.func1.1()
+       1: cmd/xl-storage-disk-id-check.go:1037:cmd.(*xlStorageDiskIDCheck).monitorDiskWritable.func1.2()
+
+API: SYSTEM.scanner
+Time: 15:00:40 UTC 06/06/2025
+DeploymentID: 030ccc5b-9ad5-4dd5-b72a-487a4785b18a
+Error: data-scanner: all drives are offline or being healed, skipping scanner cycle (*errors.errorString)
+       4: internal/logger/logger.go:271:logger.LogIf()
+       3: cmd/logging.go:136:cmd.scannerLogIf()
+       2: cmd/erasure.go:391:cmd.erasureObjects.nsScanner()
+       1: cmd/erasure-server-pool.go:779:cmd.(*erasureServerPools).NSScanner.func1()

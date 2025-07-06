@@ -6,70 +6,26 @@
     <title>File Manager - Document Converter</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        .table-hover tbody tr:hover {
-            background-color: #f8fafc;
-        }
-        .btn-icon {
-            transition: all 0.2s ease;
-        }
-        .btn-icon:hover {
-            transform: scale(1.1);
-        }
-        .status-indicator {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 6px;
-        }
-        .status-success { background-color: #10b981; }
-        .status-warning { background-color: #f59e0b; }
-        .status-error { background-color: #ef4444; }
-        .tab-active {
-            border-bottom: 2px solid #3b82f6;
-            color: #3b82f6;
-        }
-        .loading-spinner {
-            border: 2px solid #f3f4f6;
-            border-top: 2px solid #3b82f6;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .page-container {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .main-content {
-            flex: 1;
-        }
-    </style>
+    <link href="/static/styles.css" rel="stylesheet">
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-gray-50 min-h-screen dotted-bg">
     <div class="page-container">
     <!-- Navigation -->
     <nav class="bg-white shadow-sm border-b">
         <div class="container mx-auto px-4">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center space-x-4">
-                    <h1 class="text-xl font-bold text-gray-800">
+                    <h1 class="text-xl font-bold text-gray-900">
                         <i class="fas fa-file-alt mr-2"></i>
                         Document Converter
                     </h1>
                 </div>
                 <div class="flex space-x-4">
-                    <a href="/static/index.html" class="px-4 py-2 text-gray-600 hover:text-blue-600">
+                    <a href="/static/index.html" class="px-4 py-2 text-gray-600 hover:text-gray-900">
                         <i class="fas fa-upload mr-1"></i>
                         Converter
                     </a>
-                    <a href="/static/file-manager.html" class="px-4 py-2 text-blue-600 font-medium">
+                    <a href="/static/file-manager.html" class="px-4 py-2 text-gray-900 font-medium">
                         <i class="fas fa-folder mr-1"></i>
                         File Manager
                     </a>
@@ -82,7 +38,7 @@
     <main class="main-content container mx-auto px-4 py-8 max-w-7xl">
         <!-- Header -->
         <div class="mb-8">
-            <h1 class="text-2xl font-bold text-gray-800 mb-2">File Manager</h1>
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">File Manager</h1>
             <p class="text-gray-600">Manage your uploaded files, converted outputs, and text splits</p>
         </div>
 
@@ -144,11 +100,27 @@
                                 <option value="date">Sort by Date</option>
                                 <option value="type">Sort by Type</option>
                             </select>
+                            
+                            <!-- View Mode Toggle (only for outputs tab) -->
+                            <div id="view-mode-container" class="view-mode-toggle hidden" data-tab="outputs">
+                                <button id="list-view-btn" class="active" onclick="fileManager.setViewMode('list')" title="List View">
+                                    <i class="fas fa-list mr-1"></i>
+                                    List
+                                </button>
+                                <button id="tree-view-btn" onclick="fileManager.setViewMode('tree')" title="Folder View">
+                                    <i class="fas fa-folder-tree mr-1"></i>
+                                    Folders
+                                </button>
+                            </div>
                         </div>
                         <div class="flex items-center space-x-2">
                             <button id="refresh-btn" onclick="refreshFiles()" class="px-3 py-2 text-gray-600 hover:text-blue-600 border border-gray-300 rounded-md hover:border-blue-300">
                                 <i class="fas fa-refresh mr-1"></i>
                                 Refresh
+                            </button>
+                            <button id="bulk-download-btn" onclick="bulkDownload()" class="px-3 py-2 text-blue-600 hover:text-blue-700 border border-blue-300 rounded-md hover:border-blue-400 hidden">
+                                <i class="fas fa-download mr-1"></i>
+                                Download Selected
                             </button>
                             <button id="bulk-delete-btn" onclick="bulkDelete()" class="px-3 py-2 text-red-600 hover:text-red-700 border border-red-300 rounded-md hover:border-red-400 hidden">
                                 <i class="fas fa-trash mr-1"></i>
@@ -157,17 +129,17 @@
                         </div>
                     </div>
 
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full table-hover">
+                    <div class="table-container">
+                        <table class="min-w-full table-hover table-responsive">
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-6 py-3 text-left">
                                         <input type="checkbox" id="select-all" onchange="toggleSelectAll()" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                                     </th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Modified</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden-mobile">Size</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden-mobile">Type</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden-mobile">Modified</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>

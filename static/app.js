@@ -4,6 +4,7 @@ class DocumentConverter {
     constructor() {
         this.fileId = null;
         this.apiBaseUrl = '/api';
+        this.progressPollingInterval = null;
         this.initializeEventListeners();
     }
 
@@ -96,23 +97,79 @@ class DocumentConverter {
             const formData = new FormData();
             formData.append('file', file);
             
-            this.showStatus('Uploading file...', 'info');
+            // Show upload progress
+            this.showUploadProgress(true);
+            this.updateUploadProgress(0, 'Starting upload...');
             
-            const response = await fetch(`${this.apiBaseUrl}/upload`, {
-                method: 'POST',
-                body: formData
+            // Create XMLHttpRequest for progress tracking
+            const xhr = new XMLHttpRequest();
+            const startTime = Date.now();
+            
+            // Track upload progress
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const percentage = Math.round((e.loaded / e.total) * 100);
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = e.loaded / elapsed; // bytes per second
+                    const remaining = (e.total - e.loaded) / speed;
+                    
+                    this.updateUploadProgress(
+                        percentage, 
+                        'Uploading...', 
+                        this.formatSpeed(speed),
+                        this.formatTime(remaining)
+                    );
+                }
             });
             
-            const result = await response.json();
+            // Handle completion
+            xhr.addEventListener('load', () => {
+                if (xhr.status === 200) {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        this.fileId = result.file_id;
+                        this.updateUploadProgress(100, 'Upload completed!');
+                        
+                        // Hide progress bar after a delay and show success
+                        setTimeout(() => {
+                            this.showUploadProgress(false);
+                            this.showStatus('File uploaded successfully!', 'success');
+                            document.getElementById('convert-btn').disabled = false;
+                        }, 1500);
+                    } catch (error) {
+                        this.showUploadProgress(false);
+                        this.showStatus('Upload failed: Invalid response', 'error');
+                    }
+                } else {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        this.showUploadProgress(false);
+                        this.showStatus(`Upload failed: ${result.error || 'Unknown error'}`, 'error');
+                    } catch (error) {
+                        this.showUploadProgress(false);
+                        this.showStatus(`Upload failed: ${xhr.statusText}`, 'error');
+                    }
+                }
+            });
             
-            if (response.ok) {
-                this.fileId = result.file_id;
-                this.showStatus('File uploaded successfully!', 'success');
-                document.getElementById('convert-btn').disabled = false;
-            } else {
-                this.showStatus(`Upload failed: ${result.error}`, 'error');
-            }
+            // Handle errors
+            xhr.addEventListener('error', () => {
+                this.showUploadProgress(false);
+                this.showStatus('Upload error: Network error', 'error');
+            });
+            
+            // Handle abort
+            xhr.addEventListener('abort', () => {
+                this.showUploadProgress(false);
+                this.showStatus('Upload cancelled', 'warning');
+            });
+            
+            // Send the request
+            xhr.open('POST', `${this.apiBaseUrl}/upload`);
+            xhr.send(formData);
+            
         } catch (error) {
+            this.showUploadProgress(false);
             this.showStatus(`Upload error: ${error.message}`, 'error');
         }
     }
@@ -126,7 +183,9 @@ class DocumentConverter {
         try {
             const outputFormat = document.getElementById('output-format').value;
             
-            this.showConvertLoading(true);
+            // Show progress bar instead of spinner for larger files
+            this.showConvertProgress(true);
+            this.startProgressPolling();
             
             const response = await fetch(`${this.apiBaseUrl}/convert`, {
                 method: 'POST',
@@ -139,19 +198,23 @@ class DocumentConverter {
                 })
             });
             
+            this.stopProgressPolling();
+            
             const result = await response.json();
             
             if (response.ok) {
+                this.showConvertProgress(false);
                 this.showConvertResult(result);
                 this.showStatus('Document converted successfully!', 'success');
                 document.getElementById('split-btn').disabled = false;
             } else {
+                this.showConvertProgress(false);
                 this.showStatus(`Conversion failed: ${result.error}`, 'error');
             }
         } catch (error) {
+            this.stopProgressPolling();
+            this.showConvertProgress(false);
             this.showStatus(`Conversion error: ${error.message}`, 'error');
-        } finally {
-            this.showConvertLoading(false);
         }
     }
 
@@ -254,6 +317,72 @@ class DocumentConverter {
         convertSpinner.classList.toggle('hidden', !loading);
     }
 
+    showConvertProgress(showing) {
+        const convertBtn = document.getElementById('convert-btn');
+        const convertText = document.getElementById('convert-text');
+        const progressContainer = document.getElementById('progress-container');
+        
+        convertBtn.disabled = showing;
+        convertText.classList.toggle('hidden', showing);
+        progressContainer.classList.toggle('hidden', !showing);
+        
+        if (showing) {
+            this.updateProgress(0, 'Initializing conversion...');
+        }
+    }
+
+    updateProgress(percentage, status) {
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercentage = document.getElementById('progress-percentage');
+        const progressStatus = document.getElementById('progress-status');
+        
+        if (progressBar) {
+            progressBar.style.width = `${percentage}%`;
+        }
+        if (progressPercentage) {
+            progressPercentage.textContent = `${Math.round(percentage)}%`;
+        }
+        if (progressStatus) {
+            progressStatus.textContent = status;
+        }
+    }
+
+    async pollProgress() {
+        if (!this.fileId) return;
+        
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/progress/${this.fileId}`);
+            if (response.ok) {
+                const progress = await response.json();
+                this.updateProgress(progress.percentage, progress.status);
+                
+                // If conversion is complete, stop polling
+                if (progress.percentage >= 100) {
+                    this.stopProgressPolling();
+                }
+            }
+        } catch (error) {
+            console.warn('Progress polling failed:', error);
+        }
+    }
+
+    startProgressPolling() {
+        if (this.progressPollingInterval) {
+            clearInterval(this.progressPollingInterval);
+        }
+        // Poll every 500ms for smooth progress updates
+        this.progressPollingInterval = setInterval(() => {
+            this.pollProgress();
+        }, 500);
+    }
+
+    stopProgressPolling() {
+        if (this.progressPollingInterval) {
+            clearInterval(this.progressPollingInterval);
+            this.progressPollingInterval = null;
+        }
+    }
+
     showSplitLoading(loading) {
         const splitBtn = document.getElementById('split-btn');
         const splitText = document.getElementById('split-text');
@@ -310,6 +439,69 @@ class DocumentConverter {
             separatorsInput.classList.remove('hidden');
         } else {
             separatorsInput.classList.add('hidden');
+        }
+    }
+
+    showUploadProgress(show) {
+        const container = document.getElementById('upload-progress-container');
+        if (show) {
+            container.classList.remove('hidden');
+        } else {
+            container.classList.add('hidden');
+        }
+    }
+
+    updateUploadProgress(percentage, message, speed = null, eta = null) {
+        const progressBar = document.getElementById('upload-progress-bar');
+        const progressPercentage = document.getElementById('upload-progress-percentage');
+        const statusText = document.getElementById('upload-status-text');
+        const speedElement = document.getElementById('upload-speed');
+        const etaElement = document.getElementById('upload-eta');
+        
+        progressBar.style.width = `${percentage}%`;
+        progressPercentage.textContent = `${percentage}%`;
+        statusText.textContent = message;
+        
+        if (speed) {
+            speedElement.textContent = speed;
+            speedElement.classList.remove('hidden');
+        } else {
+            speedElement.classList.add('hidden');
+        }
+        
+        if (eta && eta !== 'ETA: --') {
+            etaElement.textContent = `ETA: ${eta}`;
+            etaElement.classList.remove('hidden');
+        } else {
+            etaElement.classList.add('hidden');
+        }
+    }
+
+    formatSpeed(bytesPerSecond) {
+        if (bytesPerSecond < 1024) {
+            return `${Math.round(bytesPerSecond)} B/s`;
+        } else if (bytesPerSecond < 1024 * 1024) {
+            return `${Math.round(bytesPerSecond / 1024)} KB/s`;
+        } else {
+            return `${Math.round(bytesPerSecond / (1024 * 1024))} MB/s`;
+        }
+    }
+
+    formatTime(seconds) {
+        if (isNaN(seconds) || seconds === Infinity) {
+            return '--';
+        }
+        
+        if (seconds < 60) {
+            return `${Math.round(seconds)}s`;
+        } else if (seconds < 3600) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.round(seconds % 60);
+            return `${minutes}m ${remainingSeconds}s`;
+        } else {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${minutes}m`;
         }
     }
 
