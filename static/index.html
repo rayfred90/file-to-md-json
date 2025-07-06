@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Converter & Text Splitter</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .drag-over {
             border-color: #3b82f6;
@@ -13,10 +14,64 @@
         .upload-area {
             transition: all 0.3s ease;
         }
+        .page-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .main-content {
+            flex: 1;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-success { background-color: #10b981; }
+        .status-warning { background-color: #f59e0b; }
+        
+        /* Responsive improvements for split results */
+        @media (max-width: 640px) {
+            #split-info .flex {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            #download-split-btn {
+                width: 100%;
+                margin-top: 0.5rem;
+            }
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-6xl">
+    <div class="page-container">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b mb-8">
+        <div class="container mx-auto px-4">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-xl font-bold text-gray-800">
+                        <i class="fas fa-file-alt mr-2"></i>
+                        Document Converter
+                    </h1>
+                </div>
+                <div class="flex space-x-4">
+                    <a href="/static/index.html" class="px-4 py-2 text-blue-600 font-medium">
+                        <i class="fas fa-upload mr-1"></i>
+                        Converter
+                    </a>
+                    <a href="/static/file-manager.html" class="px-4 py-2 text-gray-600 hover:text-blue-600">
+                        <i class="fas fa-folder mr-1"></i>
+                        File Manager
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-content container mx-auto px-4 py-8 max-w-6xl">
         <!-- Header -->
         <div class="text-center mb-8">
             <h1 class="text-3xl font-bold text-gray-800 mb-2">Document Converter & Text Splitter</h1>
@@ -46,7 +101,7 @@
                         </div>
                     </div>
                     
-                    <input type="file" id="file-input" class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.epub,.mobi,.txt,.md,.js,.ts,.py,.java,.cpp,.html,.css,.json,.xml,.yaml,.sql,.php,.go,.rust">
+                    <input type="file" id="file-input" class="hidden" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.epub,.mobi,.txt,.md,.js,.ts,.py,.java,.cpp,.html,.css,.json,.xml,.yaml,.sql,.php,.go,.rust,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.gif,.webp">
                     
                     <div id="file-info" class="mt-4 hidden">
                         <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -170,7 +225,7 @@
                     <h2 class="text-xl font-semibold mb-4">4. Split Results</h2>
                     
                     <div id="split-info" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                        <div class="flex items-center justify-between">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                             <div>
                                 <p class="font-medium text-blue-900">
                                     <span id="chunk-count"></span> chunks created
@@ -179,9 +234,11 @@
                                     Parameters: <span id="used-params"></span>
                                 </p>
                             </div>
-                            <button id="download-split-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                                Download Split File
-                            </button>
+                            <div class="flex-shrink-0">
+                                <button id="download-split-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors">
+                                    Download Split File
+                                </button>
+                            </div>
                         </div>
                     </div>
                     
@@ -192,6 +249,22 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex justify-between items-center text-sm text-gray-600">
+                <div>
+                    <span class="status-indicator status-success"></span>
+                    Storage: CLOUD (MinIO)
+                </div>
+                <div>
+                    Document Converter & Text Splitter
+                </div>
+            </div>
+        </div>
+    </footer>
     </div>
 
     <script src="/static/app.js"></script>
