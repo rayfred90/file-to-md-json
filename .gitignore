@@ -58,6 +58,7 @@ outputs/
 
 # MinIO Storage Data
 minio_storage/data/
+minio_storage/data/.minio.sys/
 file_metadata/
 conversion_metadata/
 sessions/
