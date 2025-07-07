@@ -23,7 +23,7 @@ class Config:
     OUTPUT_FOLDER = 'outputs'  # Keep for backward compatibility during migration
     
     # MinIO Configuration
-    MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT', 'localhost:9000')
+    MINIO_ENDPOINT = os.getenv('MINIO_ENDPOINT')  # No default value
     MINIO_ACCESS_KEY = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
     MINIO_SECRET_KEY = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
     MINIO_SECURE = os.getenv('MINIO_SECURE', 'false').lower() == 'true'

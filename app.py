@@ -39,9 +39,9 @@ from processors.pdf_processor import PDFProcessor
 from processors.doc_processor import DocProcessor
 from processors.excel_processor import ExcelProcessor
 from processors.ppt_processor import PPTProcessor
-from processors.ebook_processor import EbookProcessor
+# from processors.ebook_processor import EbookProcessor  # Temporarily disabled
 from processors.text_processor import TextProcessor
-from processors.ocr_processor import OCRProcessor
+# from processors.ocr_processor import OCRProcessor  # Temporarily disabled
 
 # Text splitter
 from text_splitter import TextSplitterService
@@ -157,8 +157,8 @@ processors = {
     'csv': ExcelProcessor(),
     'ppt': PPTProcessor(),
     'pptx': PPTProcessor(),
-    'epub': EbookProcessor(),
-    'mobi': EbookProcessor(),
+    # 'epub': EbookProcessor(),  # Temporarily disabled
+    # 'mobi': EbookProcessor(),  # Temporarily disabled
     'txt': TextProcessor(),
     'md': TextProcessor(),
     'js': TextProcessor(),
@@ -175,14 +175,14 @@ processors = {
     'php': TextProcessor(),
     'go': TextProcessor(),
     'rust': TextProcessor(),
-    'png': OCRProcessor(),
-    'jpg': OCRProcessor(),
-    'jpeg': OCRProcessor(),
-    'tiff': OCRProcessor(),
-    'tif': OCRProcessor(),
-    'bmp': OCRProcessor(),
-    'gif': OCRProcessor(),
-    'webp': OCRProcessor()
+    # 'png': OCRProcessor(),  # Temporarily disabled
+    # 'jpg': OCRProcessor(),  # Temporarily disabled
+    # 'jpeg': OCRProcessor(),  # Temporarily disabled
+    # 'tiff': OCRProcessor(),  # Temporarily disabled
+    # 'tif': OCRProcessor(),  # Temporarily disabled
+    # 'bmp': OCRProcessor(),  # Temporarily disabled
+    # 'gif': OCRProcessor(),  # Temporarily disabled
+    # 'webp': OCRProcessor()  # Temporarily disabled
 }
 
 text_splitter_service = TextSplitterService()

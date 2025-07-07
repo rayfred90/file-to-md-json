@@ -3,9 +3,9 @@ from .pdf_processor import PDFProcessor
 from .doc_processor import DocProcessor
 from .excel_processor import ExcelProcessor
 from .ppt_processor import PPTProcessor
-from .ebook_processor import EbookProcessor
+# from .ebook_processor import EbookProcessor  # Temporarily disabled
 from .text_processor import TextProcessor
-from .ocr_processor import OCRProcessor
+# from .ocr_processor import OCRProcessor  # Temporarily disabled
 
 __all__ = [
     'BaseProcessor',
@@ -13,7 +13,7 @@ __all__ = [
     'DocProcessor', 
     'ExcelProcessor',
     'PPTProcessor',
-    'EbookProcessor',
+    # 'EbookProcessor',  # Temporarily disabled
     'TextProcessor',
-    'OCRProcessor'
+    # 'OCRProcessor'  # Temporarily disabled
 ]
