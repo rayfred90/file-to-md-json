@@ -11,6 +11,7 @@ pypdf2==3.0.1
 markdown==3.5.2
 beautifulsoup4==4.12.2
 pandas==2.2.0
+pyarrow==15.0.0
 minio==7.2.0
 python-dotenv==1.0.0
 tabulate==0.9.0
