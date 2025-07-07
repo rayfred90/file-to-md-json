@@ -1,4 +1,5 @@
-"""
+"""Cache classes.
+
 .. warning::
   Beta Feature!
 
@@ -23,7 +24,10 @@ Cache directly competes with Memory. See documentation for Pros and Cons.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any, Optional
+
+from typing_extensions import override
 
 from langchain_core.outputs import Generation
 from langchain_core.runnables import run_in_executor
@@ -157,9 +161,10 @@ class InMemoryCache(BaseCache):
         Raises:
             ValueError: If maxsize is less than or equal to 0.
         """
-        self._cache: Dict[Tuple[str, str], RETURN_VAL_TYPE] = {}
+        self._cache: dict[tuple[str, str], RETURN_VAL_TYPE] = {}
         if maxsize is not None and maxsize <= 0:
-            raise ValueError("maxsize must be greater than 0")
+            msg = "maxsize must be greater than 0"
+            raise ValueError(msg)
         self._maxsize = maxsize
 
     def lookup(self, prompt: str, llm_string: str) -> Optional[RETURN_VAL_TYPE]:
@@ -191,6 +196,7 @@ class InMemoryCache(BaseCache):
             del self._cache[next(iter(self._cache))]
         self._cache[(prompt, llm_string)] = return_val
 
+    @override
     def clear(self, **kwargs: Any) -> None:
         """Clear cache."""
         self._cache = {}
@@ -224,6 +230,7 @@ class InMemoryCache(BaseCache):
         """
         self.update(prompt, llm_string, return_val)
 
+    @override
     async def aclear(self, **kwargs: Any) -> None:
         """Async clear cache."""
         self.clear()
