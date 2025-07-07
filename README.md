@@ -97,7 +97,7 @@ con/
 
 1. **Clone or navigate to the project directory:**
    ```bash
-   cd file-to-md-json/
+   cd /home/adebo/con
    ```
 
 2. **Run the setup script:**
