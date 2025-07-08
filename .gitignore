@@ -71,3 +71,7 @@ test_split_download.md
 # Temporary files
 *.tmp
 *.temp
+
+# Downloaded binaries during setup
+minio
+mc
