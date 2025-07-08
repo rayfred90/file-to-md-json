@@ -120,7 +120,7 @@ pip3 --version     # Should show pip version
 
 1. **Navigate to the project directory:**
    ```bash
-   cd /home/adebo/con
+   cd /file-to-md-json
    ```
 
 2. **Run the setup script:**
