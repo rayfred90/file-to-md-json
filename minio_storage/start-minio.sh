@@ -3,7 +3,7 @@
 # MinIO Server Start Script
 # This script starts the MinIO server with proper configuration
 
-MINIO_DIR="/home/adebo/con/minio_storage"
+MINIO_DIR="."
 DATA_DIR="$MINIO_DIR/data"
 CONFIG_FILE="$MINIO_DIR/config/minio.env"
 LOG_FILE="$MINIO_DIR/logs/minio.log"
