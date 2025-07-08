@@ -68,7 +68,7 @@ else
     
     # Start MinIO server
     MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
-    minio server data --address :9000 --console-address :9001 > logs/minio.log 2>&1 &
+    minio server data --address 0.0.0.0:9000 --console-address 0.0.0.0:9001 > logs/minio.log 2>&1 &
     MINIO_PID=$!
     echo -e "${GREEN}✅ MinIO started manually with PID: $MINIO_PID${NC}"
 fi
