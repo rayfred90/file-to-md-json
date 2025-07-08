@@ -89,15 +89,38 @@ con/
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Python 3.8+
-- pip (Python package manager)
+### Prerequisites & Installation
+
+#### Step 1: Install Python 3.8+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv
+```
+
+**macOS (using Homebrew):**
+```bash
+brew install python3
+```
+
+**Windows:**
+- Download Python from https://python.org/downloads/
+- During installation, make sure to check "Add Python to PATH"
+- pip is included with Python 3.4+
+
+#### Step 2: Verify Installation
+```bash
+python3 --version  # Should show Python 3.8+
+pip3 --version     # Should show pip version
+```
 
 ### Installation & Setup
 
-1. **Clone or navigate to the project directory:**
+#### Option 1: Automated Setup (Recommended)
+
+1. **Navigate to the project directory:**
    ```bash
-   cd ./file-to-md-json
+   cd /home/adebo/con
    ```
 
 2. **Run the setup script:**
@@ -112,28 +135,58 @@ con/
    ./run.sh
    ```
 
-### Manual Setup (Alternative)
+#### Option 2: Manual Setup
 
-1. **Create virtual environment:**
+1. **Navigate to the project directory:**
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   cd /home/adebo/con
    ```
 
-2. **Install dependencies:**
+2. **Create and activate virtual environment:**
    ```bash
-   pip install -r requirements.txt
+   # Create virtual environment
+   python3 -m venv venv
+   
+   # Activate virtual environment
+   # On Linux/macOS:
+   source venv/bin/activate
+   
+   # On Windows:
+   # venv\Scripts\activate
    ```
 
-3. **Run the application:**
+3. **Install dependencies:**
    ```bash
-   python app.py
+   pip3 install -r requirements.txt
    ```
 
-4. **Open in browser:**
+4. **Run the application:**
+   ```bash
+   python3 app.py
+   ```
+
+5. **Open in browser:**
    ```
    http://localhost:5000
    ```
+
+### Troubleshooting Installation
+
+**If you get "python3: command not found":**
+- On some systems, try `python` instead of `python3`
+- Make sure Python is added to your PATH
+
+**If you get "pip3: command not found":**
+- Try `pip` instead of `pip3`
+- On Ubuntu/Debian: `sudo apt install python3-pip`
+
+**If you get permission errors:**
+- Make sure you're in the activated virtual environment
+- Try running with `sudo` only if absolutely necessary
+
+**Virtual environment not activating:**
+- Make sure you're in the correct directory
+- Check that the `venv` folder was created successfully
 
 ## 🔧 API Endpoints
 
